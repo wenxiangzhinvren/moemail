@@ -27,6 +27,10 @@ const run = (cmd: string) => {
   execSync(cmd, { stdio: "inherit" });
 };
 
+/* =========================
+   env
+========================= */
+
 const validateEnvironment = () => {
   const required = ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"];
   const missing = required.filter((k) => !process.env[k]);
@@ -37,28 +41,20 @@ const validateEnvironment = () => {
 };
 
 /* =========================
-   config files
+   wrangler config setup
 ========================= */
 
 const setupConfigFile = (examplePath: string, targetPath: string) => {
-  if (existsSync(targetPath)) {
-    console.log(`✨ ${targetPath} exists`);
-    return;
-  }
-
-  if (!existsSync(examplePath)) {
-    console.log(`⚠️ missing ${examplePath}`);
-    return;
-  }
+  if (existsSync(targetPath)) return;
+  if (!existsSync(examplePath)) return;
 
   const json = JSON.parse(readFileSync(examplePath, "utf-8"));
 
   if (PROJECT_NAME !== "moemail") {
-    const name = targetPath.split("/").at(-1);
-
-    if (name === "wrangler.json") json.name = PROJECT_NAME;
-    if (name === "wrangler.email.json") json.name = `${PROJECT_NAME}-email`;
-    if (name === "wrangler.cleanup.json") json.name = `${PROJECT_NAME}-cleanup`;
+    const file = targetPath.split("/").at(-1);
+    if (file === "wrangler.json") json.name = PROJECT_NAME;
+    if (file === "wrangler.email.json") json.name = `${PROJECT_NAME}-email`;
+    if (file === "wrangler.cleanup.json") json.name = `${PROJECT_NAME}-cleanup`;
   }
 
   if (json.d1_databases?.length) {
@@ -66,12 +62,9 @@ const setupConfigFile = (examplePath: string, targetPath: string) => {
   }
 
   writeFileSync(targetPath, JSON.stringify(json, null, 2));
-  console.log(`✅ setup ${targetPath}`);
 };
 
 const setupWranglerConfigs = () => {
-  console.log("🔧 setup wrangler configs");
-
   const list = [
     ["wrangler.example.json", "wrangler.json"],
     ["wrangler.email.example.json", "wrangler.email.json"],
@@ -88,8 +81,6 @@ const setupWranglerConfigs = () => {
 ========================= */
 
 const updateDatabaseConfig = (id: string) => {
-  console.log(`📝 DB ID: ${id}`);
-
   ["wrangler.json", "wrangler.email.json", "wrangler.cleanup.json"].forEach(
     (file) => {
       if (!existsSync(file)) return;
@@ -107,12 +98,10 @@ const checkAndCreateDatabase = async () => {
   try {
     const db = await getDatabase();
     updateDatabaseConfig(db.uuid);
-    console.log("✅ DB exists");
   } catch (e) {
     if (e instanceof NotFoundError) {
       const db = await createDatabase();
       updateDatabaseConfig(db.uuid);
-      console.log("✅ DB created");
     } else {
       throw e;
     }
@@ -156,18 +145,17 @@ const checkAndCreateKVNamespace = async () => {
 };
 
 /* =========================
-   Pages (🔥 FIXED WRANGLER V4)
+   Pages deploy (WRANGLER V4 FIX)
 ========================= */
 
 const deployPages = () => {
-  console.log("🚧 Deploy Pages (v4)");
-
   const dir = existsSync(".vercel/output/static")
     ? ".vercel/output/static"
     : "dist";
 
-  // ❌ no --branch anymore
-  run(`wrangler pages deploy ${dir} --project-name ${PROJECT_NAME}`);
+  run(
+    `pnpm dlx wrangler pages deploy ${dir} --project-name ${PROJECT_NAME}`
+  );
 };
 
 /* =========================
@@ -176,78 +164,14 @@ const deployPages = () => {
 
 const deployEmailWorker = () => {
   try {
-    run(`wrangler deploy --config wrangler.email.json`);
+    run(`pnpm dlx wrangler deploy --config wrangler.email.json`);
   } catch {}
 };
 
 const deployCleanupWorker = () => {
   try {
-    run(`wrangler deploy --config wrangler.cleanup.json`);
+    run(`pnpm dlx wrangler deploy --config wrangler.cleanup.json`);
   } catch {}
-};
-
-/* =========================
-   env
-========================= */
-
-const setupEnvFile = () => {
-  const env = resolve(".env");
-  const example = resolve(".env.example");
-
-  if (existsSync(env)) return;
-
-  if (!existsSync(example)) {
-    throw new Error(".env.example missing");
-  }
-
-  writeFileSync(env, readFileSync(example, "utf-8"));
-};
-
-const updateEnvVar = (k: string, v: string) => {
-  process.env[k] = v;
-
-  const file = resolve(".env");
-  let content = readFileSync(file, "utf-8");
-
-  const r = new RegExp(`^${k}\\s*=\\s*".*?"`, "m");
-
-  if (r.test(content)) {
-    content = content.replace(r, `${k} = "${v}"`);
-  } else {
-    content += `\n${k} = "${v}"`;
-  }
-
-  writeFileSync(file, content);
-};
-
-/* =========================
-   Pages + secrets
-========================= */
-
-const checkAndCreatePages = async () => {
-  try {
-    const pages = await getPages();
-
-    if (!CUSTOM_DOMAIN && pages.subdomain) {
-      updateEnvVar(
-        "CUSTOM_DOMAIN",
-        `https://${pages.subdomain}`
-      );
-    }
-  } catch (e) {
-    if (e instanceof NotFoundError) {
-      const pages = await createPages();
-
-      if (!CUSTOM_DOMAIN && pages.subdomain) {
-        updateEnvVar(
-          "CUSTOM_DOMAIN",
-          `https://${pages.subdomain}`
-        );
-      }
-    } else {
-      throw e;
-    }
-  }
 };
 
 /* =========================
@@ -255,7 +179,7 @@ const checkAndCreatePages = async () => {
 ========================= */
 
 const pushSecrets = () => {
-  if (!existsSync(".env")) setupEnvFile();
+  if (!existsSync(".env")) return;
 
   const runtime = [
     "AUTH_GITHUB_ID",
@@ -284,7 +208,7 @@ const pushSecrets = () => {
   const tmp = resolve(".env.runtime.json");
   writeFileSync(tmp, JSON.stringify(secrets, null, 2));
 
-  run(`wrangler pages secret bulk ${tmp}`);
+  run(`pnpm dlx wrangler pages secret bulk ${tmp}`);
 
   execSync(`rm ${tmp}`);
 };
@@ -298,7 +222,6 @@ const main = async () => {
 
   validateEnvironment();
 
-  setupEnvFile();
   setupWranglerConfigs();
 
   await checkAndCreateDatabase();
