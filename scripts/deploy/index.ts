@@ -19,7 +19,7 @@ const CUSTOM_DOMAIN = process.env.CUSTOM_DOMAIN;
 const KV_NAMESPACE_ID = process.env.KV_NAMESPACE_ID;
 
 /* =========================
-   utils
+   runner
 ========================= */
 
 const run = (cmd: string) => {
@@ -41,27 +41,27 @@ const validateEnvironment = () => {
 };
 
 /* =========================
-   wrangler config setup
+   wrangler config
 ========================= */
 
-const setupConfigFile = (examplePath: string, targetPath: string) => {
-  if (existsSync(targetPath)) return;
-  if (!existsSync(examplePath)) return;
+const setupConfigFile = (example: string, target: string) => {
+  if (existsSync(target)) return;
+  if (!existsSync(example)) return;
 
-  const json = JSON.parse(readFileSync(examplePath, "utf-8"));
+  const json = JSON.parse(readFileSync(example, "utf-8"));
 
   if (PROJECT_NAME !== "moemail") {
-    const file = targetPath.split("/").at(-1);
-    if (file === "wrangler.json") json.name = PROJECT_NAME;
-    if (file === "wrangler.email.json") json.name = `${PROJECT_NAME}-email`;
-    if (file === "wrangler.cleanup.json") json.name = `${PROJECT_NAME}-cleanup`;
+    const f = target.split("/").at(-1);
+    if (f === "wrangler.json") json.name = PROJECT_NAME;
+    if (f === "wrangler.email.json") json.name = `${PROJECT_NAME}-email`;
+    if (f === "wrangler.cleanup.json") json.name = `${PROJECT_NAME}-cleanup`;
   }
 
   if (json.d1_databases?.length) {
     json.d1_databases[0].database_name = DATABASE_NAME;
   }
 
-  writeFileSync(targetPath, JSON.stringify(json, null, 2));
+  writeFileSync(target, JSON.stringify(json, null, 2));
 };
 
 const setupWranglerConfigs = () => {
@@ -77,7 +77,7 @@ const setupWranglerConfigs = () => {
 };
 
 /* =========================
-   database
+   DB
 ========================= */
 
 const updateDatabaseConfig = (id: string) => {
@@ -145,7 +145,7 @@ const checkAndCreateKVNamespace = async () => {
 };
 
 /* =========================
-   Pages deploy (WRANGLER V4 FIX)
+   Pages deploy (SAFE)
 ========================= */
 
 const deployPages = () => {
@@ -228,7 +228,8 @@ const main = async () => {
   migrateDatabase();
 
   await checkAndCreateKVNamespace();
-  await checkAndCreatePages();
+
+  // ⚠️ 已移除 checkAndCreatePages（避免 undefined crash）
 
   pushSecrets();
 
