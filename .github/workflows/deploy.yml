@@ -15,20 +15,24 @@ jobs:
         with:
           fetch-depth: 0
 
+      # ✅ pnpm 正确 setup
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
 
+      # ✅ Node + pnpm cache 修复
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: "npm"
+          cache: "pnpm"
 
+      # ✅ 安装依赖（稳定模式）
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
+      # 🚀 部署（完全依赖 dlx，不需要全局 wrangler）
       - name: Deploy
         run: pnpm dlx tsx scripts/deploy/index.ts
         env:
