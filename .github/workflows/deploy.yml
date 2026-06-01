@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Get full git history for checking file changes
+          fetch-depth: 0
 
       - name: Get previous tag
         id: previoustag
@@ -32,8 +32,13 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
 
-      - name: Install Dependencies
-        run: pnpm install --frozen-lockfile
+      # ==============================================
+      # ✅ 关键修复：先安装，再强制升级 wrangler v4
+      # ==============================================
+      - name: Install Dependencies & Upgrade Wrangler
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm add -D wrangler@4 --no-frozen-lockfile
 
       - name: Run deploy script
         env:
@@ -52,7 +57,6 @@ jobs:
           AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
         run: pnpm dlx tsx scripts/deploy/index.ts
 
-      # Clean up
       - name: Post deployment cleanup
         run: |
           rm -f .env*.*
