@@ -11,26 +11,40 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # ========================
+      # Node + PNPM
+      # ========================
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install
+      # ========================
+      # Install (允许自动修复 lock)
+      # ========================
+      - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      - name: Build (ignore TS strict issues)
+      # ========================
+      # Build（关键）
+      # ========================
+      - name: Build project
         run: pnpm run build
 
+      # ========================
+      # Deploy
+      # ========================
       - name: Deploy
         run: pnpm dlx tsx scripts/deploy/index.ts
         env:
