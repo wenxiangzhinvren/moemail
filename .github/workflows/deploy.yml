@@ -9,6 +9,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -22,23 +23,22 @@ jobs:
         continue-on-error: true
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v4
         with:
           version: 9
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: 22
           cache: 'pnpm'
 
-      # ==============================================
-      # ✅ 关键修复：先安装，再强制升级 wrangler v4
-      # ==============================================
-      - name: Install Dependencies & Upgrade Wrangler
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm add -D wrangler@4 --no-frozen-lockfile
+      # ✅ 关键修复点
+      - name: Install Dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Verify Wrangler
+        run: npx wrangler --version
 
       - name: Run deploy script
         env:
@@ -59,5 +59,5 @@ jobs:
 
       - name: Post deployment cleanup
         run: |
-          rm -f .env*.*
+          rm -f .env*
           rm -f wrangler*.json
