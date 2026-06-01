@@ -11,16 +11,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Get previous tag
-        id: previoustag
-        if: github.event_name == 'push'
-        run: |
-          echo "tag=$(git describe --tags --abbrev=0 HEAD^)" >> $GITHUB_OUTPUT
-        continue-on-error: true
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -31,14 +25,20 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'pnpm'
+          cache: 'npm'   # ✅ 关键：避免 pnpm-lock.yaml cache 报错
 
-      # ✅ 关键修复点
-      - name: Install Dependencies
+      - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      - name: Verify Wrangler
+      - name: Verify wrangler
         run: npx wrangler --version
+
+      - name: Get previous tag
+        id: previoustag
+        if: github.event_name == 'push'
+        run: |
+          echo "tag=$(git describe --tags --abbrev=0 HEAD^)" >> $GITHUB_OUTPUT
+        continue-on-error: true
 
       - name: Run deploy script
         env:
@@ -57,7 +57,7 @@ jobs:
           AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
         run: pnpm dlx tsx scripts/deploy/index.ts
 
-      - name: Post deployment cleanup
+      - name: Cleanup
         run: |
           rm -f .env*
           rm -f wrangler*.json
