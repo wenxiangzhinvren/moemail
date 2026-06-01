@@ -18,481 +18,305 @@ const KV_NAMESPACE_NAME = process.env.KV_NAMESPACE_NAME || "moemail-kv";
 const CUSTOM_DOMAIN = process.env.CUSTOM_DOMAIN;
 const KV_NAMESPACE_ID = process.env.KV_NAMESPACE_ID;
 
-/**
- * 验证必要的环境变量
- */
+/* =========================
+   utils
+========================= */
+
+const run = (cmd: string) => {
+  console.log(`▶ ${cmd}`);
+  execSync(cmd, { stdio: "inherit" });
+};
+
 const validateEnvironment = () => {
-  const requiredEnvVars = ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"];
-  const missing = requiredEnvVars.filter((varName) => !process.env[varName]);
+  const required = ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"];
+  const missing = required.filter((k) => !process.env[k]);
 
-  if (missing.length > 0) {
-    throw new Error(
-      `Missing required environment variables: ${missing.join(", ")}`
-    );
+  if (missing.length) {
+    throw new Error(`Missing env: ${missing.join(", ")}`);
   }
 };
 
-/**
- * 处理JSON配置文件
- */
+/* =========================
+   config files
+========================= */
+
 const setupConfigFile = (examplePath: string, targetPath: string) => {
-  try {
-    // 如果目标文件已存在，则跳过
-    if (existsSync(targetPath)) {
-      console.log(`✨ Configuration ${targetPath} already exists.`);
-      return;
-    }
-
-    if (!existsSync(examplePath)) {
-      console.log(`⚠️ Example file ${examplePath} does not exist, skipping...`);
-      return;
-    }
-
-    const configContent = readFileSync(examplePath, "utf-8");
-    const json = JSON.parse(configContent);
-
-    // 处理自定义项目名称
-    if (PROJECT_NAME !== "moemail") {
-      const wranglerFileName = targetPath.split("/").at(-1);
-
-      switch (wranglerFileName) {
-        case "wrangler.json":
-          json.name = PROJECT_NAME;
-          break;
-        case "wrangler.email.json":
-          json.name = `${PROJECT_NAME}-email-receiver-worker`;
-          break;
-        case "wrangler.cleanup.json":
-          json.name = `${PROJECT_NAME}-cleanup-worker`;
-          break;
-        default:
-          break;
-      }
-    }
-
-    // 处理数据库配置
-    if (json.d1_databases && json.d1_databases.length > 0) {
-      json.d1_databases[0].database_name = DATABASE_NAME;
-    }
-
-    // 写入配置文件
-    writeFileSync(targetPath, JSON.stringify(json, null, 2));
-    console.log(`✅ Configuration ${targetPath} setup successfully.`);
-  } catch (error) {
-    console.error(`❌ Failed to setup ${targetPath}:`, error);
-    throw error;
-  }
-};
-
-/**
- * 设置所有Wrangler配置文件
- */
-const setupWranglerConfigs = () => {
-  console.log("🔧 Setting up Wrangler configuration files...");
-
-  const configs = [
-    { example: "wrangler.example.json", target: "wrangler.json" },
-    { example: "wrangler.email.example.json", target: "wrangler.email.json" },
-    { example: "wrangler.cleanup.example.json", target: "wrangler.cleanup.json" },
-  ];
-
-  // 处理每个配置文件
-  for (const config of configs) {
-    setupConfigFile(
-      resolve(config.example),
-      resolve(config.target)
-    );
-  }
-};
-
-/**
- * 更新数据库ID到所有配置文件
- */
-const updateDatabaseConfig = (dbId: string) => {
-  console.log(`📝 Updating database ID (${dbId}) in configurations...`);
-
-  // 更新所有配置文件
-  const configFiles = [
-    "wrangler.json",
-    "wrangler.email.json",
-    "wrangler.cleanup.json",
-  ];
-
-  for (const filename of configFiles) {
-    const configPath = resolve(filename);
-    if (!existsSync(configPath)) continue;
-
-    try {
-      const json = JSON.parse(readFileSync(configPath, "utf-8"));
-      if (json.d1_databases && json.d1_databases.length > 0) {
-        json.d1_databases[0].database_id = dbId;
-      }
-      writeFileSync(configPath, JSON.stringify(json, null, 2));
-      console.log(`✅ Updated database ID in ${filename}`);
-    } catch (error) {
-      console.error(`❌ Failed to update ${filename}:`, error);
-    }
-  }
-};
-
-/**
- * 更新KV命名空间ID到所有配置文件
- */
-const updateKVConfig = (namespaceId: string) => {
-  console.log(`📝 Updating KV namespace ID (${namespaceId}) in configurations...`);
-
-  // KV命名空间只在主wrangler.json中使用
-  const wranglerPath = resolve("wrangler.json");
-  if (existsSync(wranglerPath)) {
-    try {
-      const json = JSON.parse(readFileSync(wranglerPath, "utf-8"));
-      if (json.kv_namespaces && json.kv_namespaces.length > 0) {
-        json.kv_namespaces[0].id = namespaceId;
-      }
-      writeFileSync(wranglerPath, JSON.stringify(json, null, 2));
-      console.log(`✅ Updated KV namespace ID in wrangler.json`);
-    } catch (error) {
-      console.error(`❌ Failed to update wrangler.json:`, error);
-    }
-  }
-};
-
-/**
- * 检查并创建数据库
- */
-const checkAndCreateDatabase = async () => {
-  console.log(`🔍 Checking if database "${DATABASE_NAME}" exists...`);
-
-  try {
-    const database = await getDatabase();
-
-    if (!database || !database.uuid) {
-      throw new Error('Database object is missing a valid UUID');
-    }
-
-    updateDatabaseConfig(database.uuid);
-    console.log(`✅ Database "${DATABASE_NAME}" already exists (ID: ${database.uuid})`);
-  } catch (error) {
-    if (error instanceof NotFoundError) {
-      console.log(`⚠️ Database not found, creating new database...`);
-      try {
-        const database = await createDatabase();
-
-        if (!database || !database.uuid) {
-          throw new Error('Database object is missing a valid UUID');
-        }
-
-        updateDatabaseConfig(database.uuid);
-        console.log(`✅ Database "${DATABASE_NAME}" created successfully (ID: ${database.uuid})`);
-      } catch (createError) {
-        console.error(`❌ Failed to create database:`, createError);
-        throw createError;
-      }
-    } else {
-      console.error(`❌ An error occurred while checking the database:`, error);
-      throw error;
-    }
-  }
-};
-
-/**
- * 迁移数据库
- */
-const migrateDatabase = () => {
-  console.log("📝 Migrating remote database...");
-  try {
-    execSync("pnpm run db:migrate-remote", { stdio: "inherit" });
-    console.log("✅ Database migration completed successfully");
-  } catch (error) {
-    console.error("❌ Database migration failed:", error);
-    throw error;
-  }
-};
-
-/**
- * 检查并创建KV命名空间
- */
-const checkAndCreateKVNamespace = async () => {
-  console.log(`🔍 Checking if KV namespace "${KV_NAMESPACE_NAME}" exists...`);
-
-  if (KV_NAMESPACE_ID) {
-    updateKVConfig(KV_NAMESPACE_ID);
-    console.log(`✅ User specified KV namespace (ID: ${KV_NAMESPACE_ID})`);
+  if (existsSync(targetPath)) {
+    console.log(`✨ ${targetPath} exists`);
     return;
   }
 
-  try {
-    let namespace;
+  if (!existsSync(examplePath)) {
+    console.log(`⚠️ missing ${examplePath}`);
+    return;
+  }
 
-    const namespaceList = await getKVNamespaceList();
-    namespace = namespaceList.find(ns => ns.title === KV_NAMESPACE_NAME);
+  const json = JSON.parse(readFileSync(examplePath, "utf-8"));
 
-    if (namespace && namespace.id) {
-      updateKVConfig(namespace.id);
-      console.log(`✅ KV namespace "${KV_NAMESPACE_NAME}" found by name (ID: ${namespace.id})`);
-    } else {
-      console.log("⚠️ KV namespace not found by name, creating new KV namespace...");
-      namespace = await createKVNamespace();
-      updateKVConfig(namespace.id);
-      console.log(`✅ KV namespace "${KV_NAMESPACE_NAME}" created successfully (ID: ${namespace.id})`);
-    }
-  } catch (error) {
-    console.error(`❌ An error occurred while checking the KV namespace:`, error);
-    throw error;
+  if (PROJECT_NAME !== "moemail") {
+    const name = targetPath.split("/").at(-1);
+
+    if (name === "wrangler.json") json.name = PROJECT_NAME;
+    if (name === "wrangler.email.json") json.name = `${PROJECT_NAME}-email`;
+    if (name === "wrangler.cleanup.json") json.name = `${PROJECT_NAME}-cleanup`;
+  }
+
+  if (json.d1_databases?.length) {
+    json.d1_databases[0].database_name = DATABASE_NAME;
+  }
+
+  writeFileSync(targetPath, JSON.stringify(json, null, 2));
+  console.log(`✅ setup ${targetPath}`);
+};
+
+const setupWranglerConfigs = () => {
+  console.log("🔧 setup wrangler configs");
+
+  const list = [
+    ["wrangler.example.json", "wrangler.json"],
+    ["wrangler.email.example.json", "wrangler.email.json"],
+    ["wrangler.cleanup.example.json", "wrangler.cleanup.json"],
+  ];
+
+  for (const [a, b] of list) {
+    setupConfigFile(resolve(a), resolve(b));
   }
 };
 
-/**
- * 检查并创建Pages项目
- */
-const checkAndCreatePages = async () => {
-  console.log(`🔍 Checking if project "${PROJECT_NAME}" exists...`);
+/* =========================
+   database
+========================= */
 
+const updateDatabaseConfig = (id: string) => {
+  console.log(`📝 DB ID: ${id}`);
+
+  ["wrangler.json", "wrangler.email.json", "wrangler.cleanup.json"].forEach(
+    (file) => {
+      if (!existsSync(file)) return;
+
+      const json = JSON.parse(readFileSync(file, "utf-8"));
+      if (json.d1_databases?.length) {
+        json.d1_databases[0].database_id = id;
+      }
+      writeFileSync(file, JSON.stringify(json, null, 2));
+    }
+  );
+};
+
+const checkAndCreateDatabase = async () => {
   try {
-    await getPages();
-    console.log("✅ Project already exists, proceeding with update...");
-  } catch (error) {
-    if (error instanceof NotFoundError) {
-      console.log("⚠️ Project not found, creating new project...");
+    const db = await getDatabase();
+    updateDatabaseConfig(db.uuid);
+    console.log("✅ DB exists");
+  } catch (e) {
+    if (e instanceof NotFoundError) {
+      const db = await createDatabase();
+      updateDatabaseConfig(db.uuid);
+      console.log("✅ DB created");
+    } else {
+      throw e;
+    }
+  }
+};
+
+const migrateDatabase = () => {
+  run("pnpm run db:migrate-remote");
+};
+
+/* =========================
+   KV
+========================= */
+
+const updateKVConfig = (id: string) => {
+  const file = resolve("wrangler.json");
+  if (!existsSync(file)) return;
+
+  const json = JSON.parse(readFileSync(file, "utf-8"));
+  if (json.kv_namespaces?.length) {
+    json.kv_namespaces[0].id = id;
+  }
+  writeFileSync(file, JSON.stringify(json, null, 2));
+};
+
+const checkAndCreateKVNamespace = async () => {
+  if (KV_NAMESPACE_ID) {
+    updateKVConfig(KV_NAMESPACE_ID);
+    return;
+  }
+
+  const list = await getKVNamespaceList();
+  const found = list.find((x) => x.title === KV_NAMESPACE_NAME);
+
+  if (found?.id) {
+    updateKVConfig(found.id);
+  } else {
+    const ns = await createKVNamespace();
+    updateKVConfig(ns.id);
+  }
+};
+
+/* =========================
+   Pages (🔥 FIXED WRANGLER V4)
+========================= */
+
+const deployPages = () => {
+  console.log("🚧 Deploy Pages (v4)");
+
+  const dir = existsSync(".vercel/output/static")
+    ? ".vercel/output/static"
+    : "dist";
+
+  // ❌ no --branch anymore
+  run(`wrangler pages deploy ${dir} --project-name ${PROJECT_NAME}`);
+};
+
+/* =========================
+   Workers
+========================= */
+
+const deployEmailWorker = () => {
+  try {
+    run(`wrangler deploy --config wrangler.email.json`);
+  } catch {}
+};
+
+const deployCleanupWorker = () => {
+  try {
+    run(`wrangler deploy --config wrangler.cleanup.json`);
+  } catch {}
+};
+
+/* =========================
+   env
+========================= */
+
+const setupEnvFile = () => {
+  const env = resolve(".env");
+  const example = resolve(".env.example");
+
+  if (existsSync(env)) return;
+
+  if (!existsSync(example)) {
+    throw new Error(".env.example missing");
+  }
+
+  writeFileSync(env, readFileSync(example, "utf-8"));
+};
+
+const updateEnvVar = (k: string, v: string) => {
+  process.env[k] = v;
+
+  const file = resolve(".env");
+  let content = readFileSync(file, "utf-8");
+
+  const r = new RegExp(`^${k}\\s*=\\s*".*?"`, "m");
+
+  if (r.test(content)) {
+    content = content.replace(r, `${k} = "${v}"`);
+  } else {
+    content += `\n${k} = "${v}"`;
+  }
+
+  writeFileSync(file, content);
+};
+
+/* =========================
+   Pages + secrets
+========================= */
+
+const checkAndCreatePages = async () => {
+  try {
+    const pages = await getPages();
+
+    if (!CUSTOM_DOMAIN && pages.subdomain) {
+      updateEnvVar(
+        "CUSTOM_DOMAIN",
+        `https://${pages.subdomain}`
+      );
+    }
+  } catch (e) {
+    if (e instanceof NotFoundError) {
       const pages = await createPages();
 
       if (!CUSTOM_DOMAIN && pages.subdomain) {
-        console.log("⚠️ CUSTOM_DOMAIN is empty, using pages default domain...");
-        console.log("📝 Updating environment variables...");
-
-        // 更新环境变量为默认的Pages域名
-        const appUrl = `https://${pages.subdomain}`;
-        updateEnvVar("CUSTOM_DOMAIN", appUrl);
+        updateEnvVar(
+          "CUSTOM_DOMAIN",
+          `https://${pages.subdomain}`
+        );
       }
     } else {
-      console.error(`❌ An error occurred while checking the project:`, error);
-      throw error;
+      throw e;
     }
   }
 };
 
-/**
- * 推送Pages密钥
- */
-const pushPagesSecret = () => {
-  console.log("🔐 Pushing environment secrets to Pages...");
+/* =========================
+   secrets
+========================= */
 
-  // 定义运行时所需的环境变量列表
-  const runtimeEnvVars = [
-    'AUTH_GITHUB_ID', 
-    'AUTH_GITHUB_SECRET', 
-    'AUTH_GOOGLE_ID', 
-    'AUTH_GOOGLE_SECRET', 
-    'AUTH_SECRET'
+const pushSecrets = () => {
+  if (!existsSync(".env")) setupEnvFile();
+
+  const runtime = [
+    "AUTH_GITHUB_ID",
+    "AUTH_GITHUB_SECRET",
+    "AUTH_GOOGLE_ID",
+    "AUTH_GOOGLE_SECRET",
+    "AUTH_SECRET",
   ];
 
-  try {
-    // 确保.env文件存在
-    if (!existsSync(resolve('.env'))) {
-      setupEnvFile();
+  const env = readFileSync(".env", "utf-8");
+
+  const secrets: Record<string, string> = {};
+
+  env.split("\n").forEach((line) => {
+    const [k, v] = line.split("=");
+    if (!k || !v) return;
+
+    const key = k.trim();
+    const value = v.replace(/["']/g, "").trim();
+
+    if (runtime.includes(key) && value) {
+      secrets[key] = value;
     }
+  });
 
-    // 读取.env文件内容
-    const envContent = readFileSync(resolve('.env'), 'utf-8');
-    
-    // 解析环境变量为对象
-    const secrets: Record<string, string> = {};
-    
-    envContent.split('\n').forEach(line => {
-      const trimmedLine = line.trim();
-      
-      // 跳过注释和空行
-      if (!trimmedLine || trimmedLine.startsWith('#')) {
-        return;
-      }
-      
-      // 解析键值对
-      const equalIndex = trimmedLine.indexOf('=');
-      if (equalIndex === -1) {
-        return;
-      }
-      
-      const key = trimmedLine.substring(0, equalIndex).trim();
-      let value = trimmedLine.substring(equalIndex + 1).trim();
-      
-      // 移除引号
-      value = value.replace(/^["']|["']$/g, '');
-      
-      // 只保留运行时所需的环境变量，且值不为空
-      if (runtimeEnvVars.includes(key) && value.length > 0) {
-        secrets[key] = value;
-      }
-    });
+  const tmp = resolve(".env.runtime.json");
+  writeFileSync(tmp, JSON.stringify(secrets, null, 2));
 
-    // 检查是否有需要推送的secrets
-    if (Object.keys(secrets).length === 0) {
-      console.log("⚠️ No runtime secrets found to push");
-      return;
-    }
+  run(`wrangler pages secret bulk ${tmp}`);
 
-    // 创建JSON格式的临时文件
-    const runtimeEnvFile = resolve('.env.runtime.json');
-    writeFileSync(runtimeEnvFile, JSON.stringify(secrets, null, 2));
-
-    console.log(`📝 Found ${Object.keys(secrets).length} secrets to push:`, Object.keys(secrets).join(', '));
-
-    // 使用临时文件推送secrets
-    execSync(`pnpm dlx wrangler pages secret bulk ${runtimeEnvFile}`, { 
-      stdio: "inherit" 
-    });
-
-    // 清理临时文件
-    if (existsSync(runtimeEnvFile)) {
-      execSync(`rm ${runtimeEnvFile}`, { stdio: "inherit" });
-    }
-
-    console.log("✅ Secrets pushed successfully");
-  } catch (error) {
-    console.error("❌ Failed to push secrets:", error);
-    
-    // 确保清理临时文件
-    const runtimeEnvFile = resolve('.env.runtime.json');
-    if (existsSync(runtimeEnvFile)) {
-      try {
-        execSync(`rm ${runtimeEnvFile}`, { stdio: "inherit" });
-      } catch (cleanupError) {
-        console.error("⚠️ Failed to cleanup temporary file:", cleanupError);
-      }
-    }
-    
-    throw error;
-  }
+  execSync(`rm ${tmp}`);
 };
 
-/**
- * 部署Pages应用
- */
-const deployPages = () => {
-  console.log("🚧 Deploying to Cloudflare Pages...");
-  try {
-    execSync("pnpm run deploy:pages", { stdio: "inherit" });
-    console.log("✅ Pages deployment completed successfully");
-  } catch (error) {
-    console.error("❌ Pages deployment failed:", error);
-    throw error;
-  }
-};
+/* =========================
+   main
+========================= */
 
-/**
- * 部署Email Worker
- */
-const deployEmailWorker = () => {
-  console.log("🚧 Deploying Email Worker...");
-  try {
-    execSync("pnpm dlx wrangler deploy --config wrangler.email.json", { stdio: "inherit" });
-    console.log("✅ Email Worker deployed successfully");
-  } catch (error) {
-    console.error("❌ Email Worker deployment failed:", error);
-    // 继续执行而不中断
-  }
-};
-
-/**
- * 部署Cleanup Worker
- */
-const deployCleanupWorker = () => {
-  console.log("🚧 Deploying Cleanup Worker...");
-  try {
-    execSync("pnpm dlx wrangler deploy --config wrangler.cleanup.json", { stdio: "inherit" });
-    console.log("✅ Cleanup Worker deployed successfully");
-  } catch (error) {
-    console.error("❌ Cleanup Worker deployment failed:", error);
-    // 继续执行而不中断
-  }
-};
-
-/**
- * 创建或更新环境变量文件
- */
-const setupEnvFile = () => {
-  console.log("📄 Setting up environment file...");
-  const envFilePath = resolve(".env");
-  const envExamplePath = resolve(".env.example");
-
-  // 如果.env文件不存在，则从.env.example复制创建
-  if (!existsSync(envFilePath) && existsSync(envExamplePath)) {
-    console.log("⚠️ .env file does not exist, creating from example...");
-
-    // 从示例文件复制
-    let envContent = readFileSync(envExamplePath, "utf-8");
-
-    // 填充当前的环境变量
-    const envVarMatches = envContent.match(/^([A-Z_]+)\s*=\s*".*?"/gm);
-    if (envVarMatches) {
-      for (const match of envVarMatches) {
-        const varName = match.split("=")[0].trim();
-        if (process.env[varName]) {
-          const regex = new RegExp(`${varName}\\s*=\\s*".*?"`, "g");
-          envContent = envContent.replace(regex, `${varName} = "${process.env[varName]}"`);
-        }
-      }
-    }
-
-    writeFileSync(envFilePath, envContent);
-    console.log("✅ .env file created from example");
-  } else if (existsSync(envFilePath)) {
-    console.log("✨ .env file already exists");
-  } else {
-    console.error("❌ .env.example file not found!");
-    throw new Error(".env.example file not found");
-  }
-};
-
-/**
- * 更新环境变量
- */
-const updateEnvVar = (name: string, value: string) => {
-  // 首先更新进程环境变量
-  process.env[name] = value;
-
-  // 然后尝试更新.env文件
-  const envFilePath = resolve(".env");
-  if (!existsSync(envFilePath)) {
-    setupEnvFile();
-  }
-
-  let envContent = readFileSync(envFilePath, "utf-8");
-  const regex = new RegExp(`^${name}\\s*=\\s*".*?"`, "m");
-
-  if (envContent.match(regex)) {
-    envContent = envContent.replace(regex, `${name} = "${value}"`);
-  } else {
-    envContent += `\n${name} = "${value}"`;
-  }
-
-  writeFileSync(envFilePath, envContent);
-  console.log(`✅ Updated ${name} in .env file`);
-};
-
-/**
- * 主函数
- */
 const main = async () => {
-  try {
-    console.log("🚀 Starting deployment process...");
+  console.log("🚀 deploy start");
 
-    validateEnvironment();
-    setupEnvFile();
-    setupWranglerConfigs();
-    await checkAndCreateDatabase();
-    migrateDatabase();
-    await checkAndCreateKVNamespace();
-    await checkAndCreatePages();
-    pushPagesSecret();
-    deployPages();
-    deployEmailWorker();
-    deployCleanupWorker();
+  validateEnvironment();
 
-    console.log("🎉 Deployment completed successfully");
-  } catch (error) {
-    console.error("❌ Deployment failed:", error);
-    process.exit(1);
-  }
+  setupEnvFile();
+  setupWranglerConfigs();
+
+  await checkAndCreateDatabase();
+  migrateDatabase();
+
+  await checkAndCreateKVNamespace();
+  await checkAndCreatePages();
+
+  pushSecrets();
+
+  deployPages();
+  deployEmailWorker();
+  deployCleanupWorker();
+
+  console.log("🎉 done");
 };
 
-main();
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
