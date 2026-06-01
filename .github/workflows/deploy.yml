@@ -10,49 +10,28 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
-    env:
-      NODE_ENV: production
-
     steps:
-      # =========================
-      # 1. checkout
-      # =========================
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # =========================
-      # 2. pnpm
-      # =========================
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
 
-      # =========================
-      # 3. Node（稳定 cache）
-      # =========================
+      # ❗关键：关闭 cache（解决你当前错误）
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: "pnpm"
 
-      # =========================
-      # 4. install（永远稳定）
-      # =========================
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      # =========================
-      # 5. build（关键！避免 dist 不存在）
-      # =========================
-      - name: Build project
+      - name: Build
         run: pnpm run build
 
-      # =========================
-      # 6. deploy script
-      # =========================
       - name: Deploy
         run: pnpm dlx tsx scripts/deploy/index.ts
         env:
