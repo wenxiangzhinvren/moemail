@@ -15,24 +15,34 @@ jobs:
         with:
           fetch-depth: 0
 
-      # ✅ pnpm 正确 setup
+      # ❗关键：先安装 pnpm
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
 
-      # ✅ Node + pnpm cache 修复
+      # ❗关键：先生成 lockfile（如果缺失）
+      - name: Ensure lockfile exists
+        run: |
+          if [ ! -f pnpm-lock.yaml ]; then
+            echo "⚠️ lockfile missing, generating..."
+            pnpm install --no-frozen-lockfile
+          else
+            echo "✅ lockfile exists"
+          fi
+
+      # ✔ 再启用 Node + cache
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: "pnpm"
 
-      # ✅ 安装依赖（稳定模式）
+      # ✔ 正式 install（安全模式）
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
-      # 🚀 部署（完全依赖 dlx，不需要全局 wrangler）
+      # 🚀 deploy
       - name: Deploy
         run: pnpm dlx tsx scripts/deploy/index.ts
         env:
