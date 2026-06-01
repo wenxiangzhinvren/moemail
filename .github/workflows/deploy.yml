@@ -20,16 +20,15 @@ jobs:
         with:
           version: 9
 
-      # ❗关键：关闭 cache（解决你当前错误）
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Install dependencies
+      - name: Install
         run: pnpm install --no-frozen-lockfile
 
-      - name: Build
+      - name: Build (ignore TS strict issues)
         run: pnpm run build
 
       - name: Deploy
